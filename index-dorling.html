@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <script src="//d3js.org/d3.v4.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.3.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/d3-force-attract@latest"></script>
+
+  <style>
+    body { margin:0;position:fixed;top:0;right:0;bottom:0;left:0; }
+    #map {
+      position:absolute;
+      width: 100%;
+      height: 100%;
+    }
+
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map').setView([34, 67], 7);
+
+    L.tileLayer('http://{s}.tile.stamen.com/terrain/{z}/{x}/{y}.png', {
+        attribution: 'Map tiles by <a href="http://stamen.com">Stamen Design</a>, under <a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a>. Data by <a href="http://openstreetmap.org">OpenStreetMap</a>, under <a href="http://www.openstreetmap.org/copyright">ODbL</a>.'
+    }).addTo(map);
+
+    // Setup our svg layer that we can manipulate with d3
+    var svg = d3.select(map.getPanes().overlayPane)
+      .append("svg");
+    var g = svg.append("g").attr("class", "leaflet-zoom-hide");
+
+    function leafletProjection(lnglat) {
+      var point = map.latLngToLayerPoint(L.latLng(lnglat.reverse()))
+      return [point.x, point.y]
+    }
+
+    var simulation = d3.forceSimulation().force('collision', d3.forceCollide(function(d) {
+      return 0.001 * d.r + 0.035; // I think this will be used in units of lat/lon, rather than pixels, so it needs to be small
+      //return d.r + 0.35;
+    })).force('attract', d3.forceAttract().target(function(d) {
+      return [d.foc_x, d.foc_y];
+    }));
+
+    var url = "afg.geojson"
+    d3.json(url, function(err, geojson) {
+      console.log("geojson", geojson)
+
+      var maxVotes = d3.max(geojson.features, function(d) { return d.properties['2014_afghanistan_preliminary_runoff_election_results_Total'];});
+
+      var circleRadius = d3.scaleSqrt()
+        .domain([0,maxVotes])
+        .range([0,5]);
+
+      var circleColor = d3.scaleLinear()
+        .domain([0,1]) // Percent Ghani
+        .range(['#bb9ecb','#93c891']);
+
+      geojson.features.forEach(function(feature) {
+        feature.x = +feature.properties.lon;
+        feature.y = +feature.properties.lat;
+        feature.foc_x = +feature.properties.lon;
+        feature.foc_y = +feature.properties.lat;
+        feature.r = circleRadius(+feature.properties['2014_afghanistan_preliminary_runoff_election_results_Total']);
+      });
+
+      simulation.nodes(geojson.features).stop();
+      for (i = j = 0, ref = Math.ceil(Math.log(simulation.alphaMin()) / Math.log(1 - simulation.alphaDecay())); 0 <= ref ? j < ref : j > ref; i = 0 <= ref ? ++j : --j) {
+        simulation.tick();
+      }
+
+      function render() {
+        // We need to reposition our SVG and our containing group when the map
+        // repositions via zoom or pan
+        // https://github.com/zetter/voronoi-maps/blob/master/lib/voronoi_map.js
+        var bounds = map.getBounds();
+        var topLeft = map.latLngToLayerPoint(bounds.getNorthWest())
+        var bottomRight = map.latLngToLayerPoint(bounds.getSouthEast())
+        svg.style("width", map.getSize().x + "px")
+          .style("height", map.getSize().y + "px")
+          .style("left", topLeft.x + "px")
+          .style("top", topLeft.y + "px");
+        g.attr("transform", "translate(" + -topLeft.x + "," + -topLeft.y + ")");
+
+        var pollingPlaces = g.selectAll("circle").data(geojson.features)
+        pollingPlaces.enter().append("circle")
+          .attr("transform", function(d) { return "translate(" + leafletProjection([d.x,d.y]) + ")"; })
+          .attr("fill-opacity",0.8)
+          .attr("stroke-opacity",0.9)
+          .attr("stroke-width",1)
+          .attr("stroke",'black')
+          .attr("fill", function(d) { return circleColor(d.properties['2014_afghanistan_preliminary_runoff_election_results_Ghani']/+d.properties['2014_afghanistan_preliminary_runoff_election_results_Total'])})
+          .attr("r", function(d) { return d.r});
+
+        pollingPlaces
+          .attr("transform", function(d) { return "translate(" + leafletProjection([d.x,d.y]) + ")"; })
+      }
+
+      // re-render our visualization whenever the view changes
+      map.on("viewreset", function() {
+        render()
+      })
+      map.on("move", function() {
+        render()
+      })
+
+      // render our initial visualization
+      render()
+    })
+
+  </script>
+</body>
+
